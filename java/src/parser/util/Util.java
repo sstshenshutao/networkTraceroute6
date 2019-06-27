@@ -1,4 +1,4 @@
-package packets;
+package parser.util;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -6,7 +6,10 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 public class Util {
-
+  public static final int DESTINATION_UNREACHABLE=0;
+  public static final int TIME_EXCEEDED=1;
+  public static final int ECHO_REPLY=2;
+  public static final int ECHO_REQUEST=3;
   /**
    * 5 -> 0x05
    *
@@ -144,12 +147,19 @@ public class Util {
    * @param splitter " " or ","
    */
   public static void printOutBytes (byte[] buffer, int retSize, String flag, String splitter) {
+    if (buffer==null){
+      System.err.println("buffernull");
+    }
     retSize = (retSize == -1)
               ? buffer.length
               : retSize;
     for (int i = 0; i < retSize; i++) {
       System.err.printf("%" + flag + splitter, buffer[i]);
     }
+    System.err.println();
+  }
+  public static void printOutBytes (byte[] buffer) {
+    printOutBytes(buffer,-1,"02x", " ");
   }
 
   /**

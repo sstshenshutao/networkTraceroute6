@@ -14,7 +14,7 @@ sourceDir="$PWD"
 # echo $sourceDir
 cd $dir;
 git checkout master;
-cp -r $sourceDir"/src/" $dir"assignment3/";
+cp -r $sourceDir"/src/" $dir"assignment3/src/";
 for arg in "$@"
   	do
 		git add *

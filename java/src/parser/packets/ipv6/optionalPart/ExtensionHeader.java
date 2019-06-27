@@ -1,4 +1,7 @@
-package packets;
+package parser.packets.ipv6.optionalPart;
+
+import parser.exceptions.PacketFormatWrongException;
+import parser.util.Util;
 
 public class ExtensionHeader extends OptionalPart {
 
@@ -35,7 +38,6 @@ public class ExtensionHeader extends OptionalPart {
 
   @Override
   public byte[] dump () {
-
     byte[] ret = Util.mergeBytes(nextHeader, headerExtensionLength, data);
     return ret;
   }
@@ -47,13 +49,21 @@ public class ExtensionHeader extends OptionalPart {
     ret += Util.byteArraytoString(data, 2);
     return ret;
   }
-  public static ExtensionHeader parse(byte[] data){
-    ExtensionHeader extensionHeader= new ExtensionHeader();
-    extensionHeader.nextHeader=new byte[]{data[0]};
-    extensionHeader.headerExtensionLength=new byte[]{data[1]};
-    int length = (((int) data[1] & 0xff) + 1) * 8;
-    extensionHeader.data=new byte[length];
-    System.arraycopy(data, 0, extensionHeader.data, 0, length);
+
+  public static ExtensionHeader parse (byte[] data) throws PacketFormatWrongException {
+//    System.err.println("ExtensionHeader parse");
+//    Util.printOutBytes(data);
+//    System.err.println("ExtensionHeader parse data end");
+    ExtensionHeader extensionHeader = new ExtensionHeader();
+    try {
+      extensionHeader.nextHeader = new byte[] { data[0] };
+      extensionHeader.headerExtensionLength = new byte[] { data[1] };
+      int length = (((int) data[1] & 0xff) + 1) * 8;
+      extensionHeader.data = new byte[length-2];
+      System.arraycopy(data, 2, extensionHeader.data, 0, length-2);
+    } catch (IndexOutOfBoundsException e) {
+      throw new PacketFormatWrongException("parse extension header wrong!");
+    }
     return extensionHeader;
   }
 

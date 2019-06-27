@@ -1,4 +1,6 @@
-package packets;
+package parser.packets.ipv6;
+
+import parser.util.Util;
 
 public enum NextHeader {
   UDP(0x11),

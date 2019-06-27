@@ -1,7 +1,12 @@
-import packets.*;
+import filter.Filter;
+import filter.IPv6PacketWrapper;
+import parser.exceptions.PacketFormatWrongException;
+import parser.packets.icmpv6.*;
+import parser.packets.ipv6.IPv6Packet;
+import parser.util.Util;
 
-import java.net.InetAddress;
-import java.net.UnknownHostException;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 
 public class Assignment3 {
 
@@ -25,6 +30,8 @@ public class Assignment3 {
     byte[] srcIp = srcIpv6;
     byte[] ipHeader;
     byte[] payload;
+    System.err.println(dst);
+    //    Util.printOutBytes(dstIp, -1, "02x", " ");
 
 
     /*====================================TODO===================================*/
@@ -36,15 +43,23 @@ public class Assignment3 {
      * 4) Print the hops found in the specified format
      */
     IPv6Packet iPv6Packet = new IPv6Packet();
+    iPv6Packet.setVersion(new byte[] { 6 });
     iPv6Packet.setSourceAddress(srcIp);
     iPv6Packet.setDestinationAddress(dstIp);
     byte[] lastSource = new byte[0];
     int hopLimitLoop = 1;
-    int sequence = 1;
+    int sequence = 0;
     while (hopLimitLoop <= hopLimit && Util.compareBytes(lastSource, dstIp) != 0) {
+      //      if (hopLimitLoop != 1) {
+      //        System.out.println();
+      //      }
+      boolean breakWhile = false;
       System.out.print(hopLimitLoop);
-      System.out.print("  ");
       for (int i = 0; i < attempts; i++) {
+        if (Util.compareBytes(lastSource, dstIp) == 0) {
+          breakWhile = true;
+        }
+        String outIP = "";
         //add hop limit
         iPv6Packet.setHopLimit(new byte[] { (byte) hopLimitLoop });
         //icmpv6
@@ -55,19 +70,19 @@ public class Assignment3 {
         //set nextHeader field
         iPv6Packet.setNextHeader(Util.dumpString("3a"));
         //set extension headers to ipv6 Packet
-
         //set Icmpv6 to ipv6 Packet
         iPv6Packet.addOptionalParts(icmPv6EchoRequest);
         //calculate length
         length = iPv6Packet.dump().length;
-//        System.err.println("length:" + length);
+        //        System.err.println("length:" + length);
         iPv6Packet.setPayloadLength(Util.dumpString(Util.intTo2BString(length - 40)));
         //set checksum to icmpv6
         buffer = iPv6Packet.dump();
         byte[] cksum = GRNVS_RAW.checksum(buffer, 0, buffer, 40, length - 40);
         icmPv6EchoRequest.setChecksum(cksum);
         buffer = iPv6Packet.dump();
-//  debug      Util.printOutBytes(buffer, length, "02x", " ");
+        //        System.err.println("writeOutBuffer");
+        //        Util.printOutBytes(buffer, length, "02x", " ");
         //write out packets
         int ret = sock.write(buffer, length);
         if (0 >= ret) {
@@ -82,6 +97,7 @@ public class Assignment3 {
           int retSize = -1;
           long timeoutMillis = timeout * 1000;
           boolean whileTimeout = false;
+          boolean unreachable = false;
           lastSource = new byte[0];
           do {
             runTime = System.currentTimeMillis();
@@ -90,59 +106,63 @@ public class Assignment3 {
               break;
             }
             retSize = sock.read(retBuffer, new Timeout(timeout));
+            if (retSize <= 0) {
+              continue;
+            }
             byte[] tmp = new byte[retSize];
             System.arraycopy(retBuffer, 0, tmp, 0, retSize);
-            IPv6Packet retIPv6Packet = null;
+            IPv6PacketWrapper retIPv6Packet = null;
             try {
-              retIPv6Packet = IPv6Packet.parse(tmp);
-            } catch (Exception e) {
-              e.printStackTrace();
+              retIPv6Packet = Filter.fromBinary(tmp, iPv6Packet,checksumFunction());
+            } catch (PacketFormatWrongException e) {
+//              if (e.getDescription().equals("checksum wrong")) {
+//                System.err.println(e.toString());
+//                GRNVS_RAW.hexdump(retBuffer,retSize);
+//              }
+              retIPv6Packet = null;
             }
-            if (retIPv6Packet != null && retIPv6Packet.getICMPv6() != null) {
-              ICMPv6 icmPv6 = retIPv6Packet.getICMPv6();
-              if (icmPv6 != null && icmPv6 instanceof ICMPv6DestinationUnreachable) {
-                whileTimeout = true;
-                break;
-              } else if (icmPv6 != null && icmPv6 instanceof ICMPv6TimeExceeded) {
-                ICMPv6 icmPv6Inside = ((ICMPv6TimeExceeded) icmPv6).getiPv6Packet().getICMPv6();
-                if (icmPv6Inside != null && icmPv6Inside instanceof ICMPv6EchoRequest) {
-                  if (
-                    Util.compareBytes(((ICMPv6EchoRequest) icmPv6Inside).getIdentifier(), Util.dumpString("1e 66")) == 0
-                      && (Util.compareBytes(((ICMPv6EchoRequest) icmPv6Inside).getSequenceNumber(),
-                      Util.dumpString(Util.intTo2BString(sequence))) == 0)) {
-                    //passed
-                    lastSource = retIPv6Packet.getSourceAddress();
-                  }
-                }
-              } else if (icmPv6 != null && icmPv6 instanceof ICMPv6EchoReply) {
-                //finished
-                if (Util.compareBytes(((ICMPv6EchoReply) icmPv6).getIdentifier(), Util.dumpString("1e 66")) == 0 && Util
-                  .compareBytes(((ICMPv6EchoReply) icmPv6).getSequenceNumber(),
-                    Util.dumpString(Util.intTo2BString(sequence))) == 0) {
-                  lastSource = retIPv6Packet.getSourceAddress();
-                }
+            if (retIPv6Packet != null) {
+              lastSource = retIPv6Packet.getiPv6Packet().getSourceAddress();
+              if (retIPv6Packet.getIcmpType() == Util.DESTINATION_UNREACHABLE) {
+                unreachable = true;
               }
+              //debug:
+              byte[] retdebug = retIPv6Packet.getiPv6Packet().dump();
+              GRNVS_RAW.hexdump(retdebug, retdebug.length);
+              //end debug
+              break;
             }
           }
           while (lastSource.length == 0);
-          String outIP;
           if (whileTimeout) {
             outIP = "*";
+          } else if (unreachable) {
+            outIP = Util.getSourceIPFromReply(lastSource) + "!X";
           } else {
             //            retBuffer[retBuffer.length-]
             outIP = Util.getSourceIPFromReply(lastSource);
           }
+          //          System.err.println("retBuffer");
+          //          Util.printOutBytes(retBuffer, length, "02x", " ");
+          System.out.print("  ");
           System.out.print(outIP);
         }
-        if (i != 2) {
-          System.out.print("  ");
+        sequence++;
+        if (outIP.length() >= 2 && outIP.substring(outIP.length() - 2).equals("!X")) {
+          breakWhile = true;
         }
       }
       hopLimitLoop++;
-      sequence++;
       System.out.println();
+      if (breakWhile) {
+        break;
+      }
     }
     /*===========================================================================*/
+  }
+
+  private static BiFunction<byte[],Integer, byte[] > checksumFunction () {
+    return (buffer,offset) -> GRNVS_RAW.checksum(buffer, 0, buffer, offset, buffer.length - offset);
   }
 
   private static byte[] srcIpv6;

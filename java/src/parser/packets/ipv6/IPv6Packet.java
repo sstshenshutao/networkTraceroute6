@@ -1,7 +1,12 @@
-package packets;
+package parser.packets.ipv6;
+
+import parser.exceptions.PacketFormatWrongException;
+import parser.packets.icmpv6.ICMPv6;
+import parser.packets.ipv6.optionalPart.OptionalPart;
+import parser.packets.ipv6.optionalPart.ExtensionHeader;
+import parser.util.Util;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 public class IPv6Packet {
@@ -33,7 +38,10 @@ public class IPv6Packet {
   }
 
   public byte[] dumpFixHeader () {
-    byte[] ret = Util.mergeBytes(Util.dumpString("60 00 00 00"), payloadLength, nextHeader, hopLimit, sourceAddress,
+    byte[] ret = Util.mergeBytes(new byte[] {
+        (byte) (((version[0] << 4) & 0xf0) + ((trafficClass[0] >> 4) & 0x0f)),
+        (byte) (((trafficClass[0] << 4) & 0xf0) + flowLabel[0])
+      }, new byte[] { flowLabel[1], flowLabel[2] }, payloadLength, nextHeader, hopLimit, sourceAddress,
       destinationAddress);
     return ret;
   }
@@ -91,7 +99,7 @@ public class IPv6Packet {
   //  Map<String, Integer> fixLen = new HashMap<>();
   public IPv6Packet () {
     //init schema
-    version = Util.dumpString("6");
+    version = Util.dumpString("0");
     trafficClass = Util.dumpString("00");
     flowLabel = Util.dumpString("0 00 00");
     payloadLength = Util.dumpString("00 00");
@@ -108,7 +116,7 @@ public class IPv6Packet {
   List<OptionalPart> optionalParts = new ArrayList<>();
 
   public void addOptionalParts (OptionalPart optionalPart) {
-    if (optionalPart==null){
+    if (optionalPart == null) {
       return;
     }
     if (optionalParts.size() == 0 || !(optionalParts.get(optionalParts.size() - 1) instanceof ICMPv6)) {
@@ -196,22 +204,20 @@ public class IPv6Packet {
     }
     OptionalPart optionalPart = optionalParts.get(optionalParts.size() - 1);
     if (optionalPart instanceof ICMPv6) {
-      return (ICMPv6)optionalPart;
+      return (ICMPv6) optionalPart;
     } else {
       return null;
     }
   }
 
-  public static IPv6Packet parse (byte[] data) {
+  public static IPv6Packet parse (byte[] data) throws PacketFormatWrongException {
     if (data.length < 40) {
-      return null;
+      throw new PacketFormatWrongException("ipv6 packet length < 40");
     }
     IPv6Packet iPv6Packet = new IPv6Packet();
-    String tmpStr = Integer.toHexString((int) data[0] & 0xff);
-    if (tmpStr.length() < 2 || tmpStr.charAt(0) != '6') {
-//      System.err.println("not ipv6 packet");
-      return null;
-    }
+    iPv6Packet.version = new byte[] { (byte) ((data[0] & 0xf0) >> 4) };
+    iPv6Packet.trafficClass = new byte[] { (byte) ((data[0] << 4) & 0xf0 + ((data[1] & 0xf0) >> 4)) };
+    iPv6Packet.flowLabel = new byte[] { (byte) (data[1] & 0x0f), data[2], data[3] };
     iPv6Packet.payloadLength = new byte[] {
       data[4], data[5]
     };
@@ -223,40 +229,14 @@ public class IPv6Packet {
     };
     System.arraycopy(data, 8, iPv6Packet.sourceAddress, 0, 16);
     System.arraycopy(data, 24, iPv6Packet.destinationAddress, 0, 16);
-    //parse nextHeader
-    int nextHeader = ((int) iPv6Packet.nextHeader[0] & 0xff);
-    int offset = 40;
-    int length = 0;
-
-    while (optionType(nextHeader) && nextHeader != NextHeader.ICMPv6.getNumber()) {
-      System.err.println("nextHeader:"+nextHeader);
-      System.err.println("NextHeader.ICMPv6.getNumber():"+NextHeader.ICMPv6.getNumber());
-      nextHeader = ((int) data[offset] & 0xff);
-      length = (((int) data[offset + 1] & 0xff) + 1) * 8;
-      offset += length;
-      byte[] extHeader = new byte[length];
-      System.arraycopy(data, offset, extHeader, 0, length);
-      iPv6Packet.addOptionalParts(ExtensionHeader.parse(extHeader));
-    }
-    if (nextHeader == NextHeader.ICMPv6.getNumber()) {
-      //icmpv6
-      byte[] icmp = new byte[data.length - offset];
-      System.arraycopy(data, offset, icmp, 0, data.length - offset);
-      iPv6Packet.addOptionalParts(ICMPv6.parse(icmp, iPv6Packet.sourceAddress, iPv6Packet.destinationAddress));
-    } else {
-      //      someOther wrong
-      return null;
-    }
+    byte[] optionalPart = new byte[data.length - 40];
+    System.arraycopy(data, 40, optionalPart, 0, data.length - 40);
+//    Util.printOutBytes(iPv6Packet.dumpFixHeader());
+//    System.err.println("ysyad");
+    iPv6Packet.optionalParts = OptionalPart.parse(optionalPart, iPv6Packet.nextHeader);
     return iPv6Packet;
   }
-  private static boolean optionType(int nextHeader){
-    for (NextHeader nh : NextHeader.values()) {
-      if (nextHeader == nh.getNumber()) {
-        return true;
-      }
-    }
-    return false;
-  }
+
 }
 
 
